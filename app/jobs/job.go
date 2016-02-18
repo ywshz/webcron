@@ -4,17 +4,22 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/astaxie/beego"
-	"github.com/lisijie/webcron/app/mail"
-	"github.com/lisijie/webcron/app/models"
 	"html/template"
 	"os/exec"
 	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
+	"doggie/app/models"
+	"doggie/app/mail"
+	"github.com/satori/go.uuid"
+	"io/ioutil"
+	"os"
+	"runtime"
 )
 
 var mailTpl *template.Template
+var WORK_FOLDER string
 
 func init() {
 	mailTpl, _ = template.New("mail_tpl").Parse(`
@@ -38,6 +43,7 @@ func init() {
 </p>
 `)
 
+	WORK_FOLDER = beego.AppConfig.String("work.folder")
 }
 
 type Job struct {
@@ -54,21 +60,34 @@ func NewJobFromTask(task *models.Task) (*Job, error) {
 	if task.Id < 1 {
 		return nil, fmt.Errorf("ToJob: 缺少id")
 	}
-	job := NewCommandJob(task.Id, task.TaskName, task.Command)
+
+	job := &Job{}
+
+	switch task.CommandType {
+	case "shell": job = NewCommandJob(task)
+	case "python": job = NewPythonJob(task)
+	case "go": job = NewGoJob(task)
+	}
+
 	job.task = task
 	job.Concurrent = task.Concurrent == 0
 	return job, nil
 }
 
-func NewCommandJob(id int, name string, command string) *Job {
+func NewCommandJob(task *models.Task) *Job {
 	job := &Job{
-		id:   id,
-		name: name,
+		id:   task.Id,
+		name: task.TaskName,
 	}
+
 	job.runFunc = func() ([]byte, []byte, error) {
+		fileName := generateCommandFile(task.CommandType, task.Command)
+		defer os.Remove(fileName)
+
 		bufOut := new(bytes.Buffer)
 		bufErr := new(bytes.Buffer)
-		cmd := exec.Command("/bin/bash", "-c", command)
+
+		cmd := exec.Command(fileName)
 		cmd.Stdout = bufOut
 		cmd.Stderr = bufErr
 		err := cmd.Run()
@@ -76,6 +95,68 @@ func NewCommandJob(id int, name string, command string) *Job {
 		return bufOut.Bytes(), bufErr.Bytes(), err
 	}
 	return job
+}
+
+func NewPythonJob(task *models.Task) *Job {
+	job := &Job{
+		id:   task.Id,
+		name: task.TaskName,
+	}
+	job.runFunc = func() ([]byte, []byte, error) {
+		fileName := generateCommandFile(task.CommandType, task.Command)
+		defer os.Remove(fileName)
+
+		bufOut := new(bytes.Buffer)
+		bufErr := new(bytes.Buffer)
+		cmd := exec.Command("python", "-f", fileName)
+		cmd.Stdout = bufOut
+		cmd.Stderr = bufErr
+		err := cmd.Run()
+
+		return bufOut.Bytes(), bufErr.Bytes(), err
+	}
+	return job
+}
+
+func NewGoJob(task *models.Task) *Job {
+	job := &Job{
+		id:   task.Id,
+		name: task.TaskName,
+	}
+	job.runFunc = func() ([]byte, []byte, error) {
+		fileName := generateCommandFile(task.CommandType, task.Command)
+		defer os.Remove(fileName)
+
+		bufOut := new(bytes.Buffer)
+		bufErr := new(bytes.Buffer)
+		cmd := exec.Command("go", "run", fileName)
+		cmd.Stdout = bufOut
+		cmd.Stderr = bufErr
+		err := cmd.Run()
+		return bufOut.Bytes(), bufErr.Bytes(), err
+	}
+	return job
+}
+
+func generateCommandFile(comdmandType,command string) string {
+	fileName := WORK_FOLDER + string(os.PathSeparator) + uuid.NewV4().String()
+	if comdmandType=="shell" && runtime.GOOS != "windows" {
+		fileName += ".sh";
+	} else {
+		fileName += ".bat";
+	}
+
+	if comdmandType=="python" {
+		fileName += ".py";
+	}
+
+	if comdmandType=="go" {
+		fileName += ".go";
+	}
+
+	ioutil.WriteFile(fileName, bytes.NewBufferString(command).Bytes(), 0644)
+
+	return fileName
 }
 
 func (j *Job) Status() int {
@@ -137,6 +218,33 @@ func (j *Job) Run() {
 	j.task.PrevTime = t.Unix()
 	j.task.ExecuteTimes++
 	j.task.Update()
+
+	// 任务完成后出发依赖关系
+	if ( err == nil) {
+		checkTasks,exist := DependencyReverseMap[j.task.Id]
+		if exist {
+			// find dependency
+			for drkey, _ := range checkTasks {
+
+				org,_ := models.TaskGetById(drkey)
+
+				matchDependency := true
+				for key,_ := range DependencyMap[drkey] {
+					tk,_ := models.TaskGetById(key)
+					if org.PrevTime > tk.PrevTime {
+						matchDependency = false
+					}
+				}
+
+				if matchDependency {
+					//trigger the task
+					beego.Debug("Trigger Task ", drkey)
+					j,_  := NewJobFromTask(org)
+					go j.Run()
+				}
+			}
+		}
+	}
 
 	// 发送邮件通知
 	if (j.task.Notify == 1 && err != nil) || j.task.Notify == 2 {

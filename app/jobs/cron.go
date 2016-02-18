@@ -2,14 +2,14 @@ package jobs
 
 import (
 	"github.com/astaxie/beego"
-	"github.com/lisijie/cron"
 	"sync"
+	"github.com/ywshz/cron"
 )
 
 var (
 	mainCron *cron.Cron
 	workPool chan bool
-	lock     sync.Mutex
+	lock sync.Mutex
 )
 
 func init() {

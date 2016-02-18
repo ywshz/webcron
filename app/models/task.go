@@ -14,7 +14,9 @@ type Task struct {
 	TaskType     int
 	Description  string
 	CronSpec     string
+	Dependency   string
 	Concurrent   int
+	CommandType  string
 	Command      string
 	Status       int
 	Notify       int
@@ -40,8 +42,8 @@ func TaskAdd(task *Task) (int64, error) {
 	if task.TaskName == "" {
 		return 0, fmt.Errorf("TaskName字段不能为空")
 	}
-	if task.CronSpec == "" {
-		return 0, fmt.Errorf("CronSpec字段不能为空")
+	if task.CronSpec == "" && task.Dependency=="" {
+		return 0, fmt.Errorf("CronSpec字段和依赖必须有一个不为空")
 	}
 	if task.Command == "" {
 		return 0, fmt.Errorf("Command字段不能为空")

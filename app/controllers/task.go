@@ -2,13 +2,13 @@ package controllers
 
 import (
 	"github.com/astaxie/beego"
-	libcron "github.com/lisijie/cron"
-	"github.com/lisijie/webcron/app/jobs"
-	"github.com/lisijie/webcron/app/libs"
-	"github.com/lisijie/webcron/app/models"
+	libcron "github.com/ywshz/cron"
 	"strconv"
 	"strings"
 	"time"
+	"doggie/app/jobs"
+	"doggie/app/models"
+	"doggie/app/libs"
 )
 
 type TaskController struct {
@@ -33,7 +33,11 @@ func (this *TaskController) List() {
 		row := make(map[string]interface{})
 		row["id"] = v.Id
 		row["name"] = v.TaskName
-		row["cron_spec"] = v.CronSpec
+		if (v.TaskType == 0 ) {
+			row["cron_spec"] = v.CronSpec
+		}else {
+			row["cron_spec"] = v.Dependency
+		}
 		row["status"] = v.Status
 		row["description"] = v.Description
 
@@ -54,7 +58,14 @@ func (this *TaskController) List() {
 			} else {
 				row["prev_time"] = "-"
 			}
-			row["running"] = 0
+
+			_,exist := jobs.DependencyMap[v.Id]
+			if exist {
+				row["running"] = 1
+			} else {
+				row["running"] = 0
+			}
+
 		}
 		list[k] = row
 	}
@@ -80,7 +91,10 @@ func (this *TaskController) Add() {
 		task.TaskName = strings.TrimSpace(this.GetString("task_name"))
 		task.Description = strings.TrimSpace(this.GetString("description"))
 		task.Concurrent, _ = this.GetInt("concurrent")
+		task.TaskType, _ = this.GetInt("taskType")
 		task.CronSpec = strings.TrimSpace(this.GetString("cron_spec"))
+		task.Dependency = strings.TrimSpace(this.GetString("dependency"))
+		task.CommandType = strings.TrimSpace(this.GetString("commandType"))
 		task.Command = strings.TrimSpace(this.GetString("command"))
 		task.Notify, _ = this.GetInt("notify")
 
@@ -91,7 +105,7 @@ func (this *TaskController) Add() {
 			for _, v := range tmp {
 				v = strings.TrimSpace(v)
 				if !libs.IsEmail([]byte(v)) {
-					this.ajaxMsg("无效的Email地址："+v, MSG_ERR)
+					this.ajaxMsg("无效的Email地址：" + v, MSG_ERR)
 				} else {
 					emailList = append(emailList, v)
 				}
@@ -99,19 +113,25 @@ func (this *TaskController) Add() {
 			task.NotifyEmail = strings.Join(emailList, "\n")
 		}
 
-		if task.TaskName == "" || task.CronSpec == "" || task.Command == "" {
+		if task.TaskName == "" || (task.CronSpec == "" && task.Dependency == "" ) || task.Command == "" {
 			this.ajaxMsg("请填写完整信息", MSG_ERR)
 		}
-		if _, err := libcron.Parse(task.CronSpec); err != nil {
-			this.ajaxMsg("cron表达式无效", MSG_ERR)
+
+		if task.TaskType == 0 {
+			if _, err := libcron.Parse(task.CronSpec); err != nil {
+				this.ajaxMsg("cron表达式无效", MSG_ERR)
+			}
+			task.Dependency = ""
+		}else {
+			task.CronSpec = ""
 		}
+
 		if _, err := models.TaskAdd(task); err != nil {
 			this.ajaxMsg(err.Error(), MSG_ERR)
 		}
 
 		this.ajaxMsg("", MSG_OK)
 	}
-
 	// 分组列表
 	groups, _ := models.TaskGroupGetList(1, 100)
 	this.Data["groups"] = groups
@@ -130,11 +150,14 @@ func (this *TaskController) Edit() {
 
 	if this.isPost() {
 		task.TaskName = strings.TrimSpace(this.GetString("task_name"))
+		task.TaskType, _ = this.GetInt("taskType")
 		task.Description = strings.TrimSpace(this.GetString("description"))
 		task.GroupId, _ = this.GetInt("group_id")
 		task.Concurrent, _ = this.GetInt("concurrent")
 		task.CronSpec = strings.TrimSpace(this.GetString("cron_spec"))
+		task.Dependency = strings.TrimSpace(this.GetString("dependency"))
 		task.Command = strings.TrimSpace(this.GetString("command"))
+		task.CommandType = strings.TrimSpace(this.GetString("commandType"))
 		task.Notify, _ = this.GetInt("notify")
 
 		notifyEmail := strings.TrimSpace(this.GetString("notify_email"))
@@ -144,7 +167,7 @@ func (this *TaskController) Edit() {
 			for _, v := range tmp {
 				v = strings.TrimSpace(v)
 				if !libs.IsEmail([]byte(v)) {
-					this.ajaxMsg("无效的Email地址："+v, MSG_ERR)
+					this.ajaxMsg("无效的Email地址：" + v, MSG_ERR)
 				} else {
 					emailList = append(emailList, v)
 				}
@@ -152,12 +175,19 @@ func (this *TaskController) Edit() {
 			task.NotifyEmail = strings.Join(emailList, "\n")
 		}
 
-		if task.TaskName == "" || task.CronSpec == "" || task.Command == "" {
+		if task.TaskName == "" || (task.CronSpec == "" && task.Dependency == "" ) || task.Command == "" {
 			this.ajaxMsg("请填写完整信息", MSG_ERR)
 		}
-		if _, err := libcron.Parse(task.CronSpec); err != nil {
-			this.ajaxMsg("cron表达式无效", MSG_ERR)
+
+		if task.TaskType == 0 {
+			if _, err := libcron.Parse(task.CronSpec); err != nil {
+				this.ajaxMsg("cron表达式无效", MSG_ERR)
+			}
+			task.Dependency = ""
+		}else {
+			task.CronSpec = ""
 		}
+
 		if err := task.Update(); err != nil {
 			this.ajaxMsg(err.Error(), MSG_ERR)
 		}
@@ -274,21 +304,74 @@ func (this *TaskController) Batch() {
 			if task, err := models.TaskGetById(id); err == nil {
 				job, err := jobs.NewJobFromTask(task)
 				if err == nil {
-					jobs.AddJob(task.CronSpec, job)
-					task.Status = 1
-					task.Update()
+
+					if task.TaskType == 0 {
+						//如果这是一个cron job
+						if jobs.AddJob(task.CronSpec, job) {
+							task.Status = 1
+							task.Update()
+						}
+					} else {
+						// 这是一个依赖性任务
+						tasks := strings.Split(task.Dependency,",")
+
+						jobs.DependencyMap[task.Id] = make(map[int]bool)
+						for _, idStr := range tasks {
+							var id int
+							id, _ = strconv.Atoi(idStr)
+
+							jobs.DependencyMap[task.Id][id]=true
+
+							_, exist := jobs.DependencyReverseMap[id]
+							if !exist {
+								jobs.DependencyReverseMap[id]=make(map[int]bool)
+							}
+							jobs.DependencyReverseMap[id][task.Id]=true;
+						}
+
+						task.Status = 1
+						task.Update()
+					}
+
 				}
 			}
 		case "pause":
-			jobs.RemoveJob(id)
 			if task, err := models.TaskGetById(id); err == nil {
+				if task.TaskType == 0 {
+					// 移除cron job
+					jobs.RemoveJob(id)
+				} else {
+					//移除依赖关系
+					dpTasks,exist := jobs.DependencyMap[task.Id]
+					if exist {
+						for key, _ := range dpTasks {
+							delete(jobs.DependencyReverseMap[key], task.Id)
+						}
+					}
+					delete(jobs.DependencyMap, task.Id)
+				}
+
 				task.Status = 0
 				task.Update()
 			}
 		case "delete":
 			models.TaskDel(id)
 			models.TaskLogDelByTaskId(id)
-			jobs.RemoveJob(id)
+
+			if task, err := models.TaskGetById(id); err == nil {
+				if task.TaskType == 0 {
+					jobs.RemoveJob(id)
+				}else {
+					//移除依赖关系
+					dpTasks,exist := jobs.DependencyMap[task.Id]
+					if exist {
+						for key, _ := range dpTasks {
+							delete(jobs.DependencyReverseMap[key], task.Id)
+						}
+					}
+					delete(jobs.DependencyMap, task.Id)
+				}
+			}
 		}
 	}
 
@@ -309,10 +392,34 @@ func (this *TaskController) Start() {
 		this.showMsg(err.Error())
 	}
 
-	if jobs.AddJob(task.CronSpec, job) {
+	if task.TaskType == 0 {
+		//如果这是一个cron job
+		if jobs.AddJob(task.CronSpec, job) {
+			task.Status = 1
+			task.Update()
+		}
+	} else {
+		// 这是一个依赖性任务
+		tasks := strings.Split(task.Dependency,",")
+
+		jobs.DependencyMap[task.Id] = make(map[int]bool)
+		for _, idStr := range tasks {
+			var id int
+			id, _ = strconv.Atoi(idStr)
+
+			jobs.DependencyMap[task.Id][id]=true
+
+			_, exist := jobs.DependencyReverseMap[id]
+			if !exist {
+				jobs.DependencyReverseMap[id]=make(map[int]bool)
+			}
+			jobs.DependencyReverseMap[id][task.Id]=true;
+		}
+
 		task.Status = 1
 		task.Update()
 	}
+
 
 	refer := this.Ctx.Request.Referer()
 	if refer == "" {
@@ -330,7 +437,19 @@ func (this *TaskController) Pause() {
 		this.showMsg(err.Error())
 	}
 
-	jobs.RemoveJob(id)
+	if task.TaskType == 0 {
+		// 移除cron job
+		jobs.RemoveJob(id)
+	} else {
+		//移除依赖关系
+		dpTasks,exist := jobs.DependencyMap[task.Id]
+		if exist {
+			for key, _ := range dpTasks {
+				delete(jobs.DependencyReverseMap[key], task.Id)
+			}
+		}
+		delete(jobs.DependencyMap, task.Id)
+	}
 	task.Status = 0
 	task.Update()
 

@@ -2,14 +2,14 @@ package controllers
 
 import (
 	"github.com/astaxie/beego"
-	"github.com/lisijie/webcron/app/libs"
-	"github.com/lisijie/webcron/app/models"
 	"strconv"
 	"strings"
+	"doggie/app/models"
+	"doggie/app/libs"
 )
 
 const (
-	MSG_OK  = 0
+	MSG_OK = 0
 	MSG_ERR = -1
 )
 
@@ -26,7 +26,7 @@ type BaseController struct {
 func (this *BaseController) Prepare() {
 	this.pageSize = 20
 	controllerName, actionName := this.GetControllerAndAction()
-	this.controllerName = strings.ToLower(controllerName[0 : len(controllerName)-10])
+	this.controllerName = strings.ToLower(controllerName[0 : len(controllerName) - 10])
 	this.actionName = strings.ToLower(actionName)
 	this.auth()
 
@@ -47,7 +47,7 @@ func (this *BaseController) auth() {
 		userId, _ := strconv.Atoi(idstr)
 		if userId > 0 {
 			user, err := models.UserGetById(userId)
-			if err == nil && password == libs.Md5([]byte(this.getClientIp()+"|"+user.Password+user.Salt)) {
+			if err == nil && password == libs.Md5([]byte(this.getClientIp() + "|" + user.Password + user.Salt)) {
 				this.userId = user.Id
 				this.userName = user.UserName
 				this.user = user
@@ -56,7 +56,7 @@ func (this *BaseController) auth() {
 	}
 
 	if this.userId == 0 && (this.controllerName != "main" ||
-		(this.controllerName == "main" && this.actionName != "logout" && this.actionName != "login")) {
+	(this.controllerName == "main" && this.actionName != "logout" && this.actionName != "login")) {
 		this.redirect(beego.URLFor("MainController.Login"))
 	}
 }

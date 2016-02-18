@@ -3,13 +3,13 @@ package controllers
 import (
 	"github.com/astaxie/beego"
 	"github.com/astaxie/beego/utils"
-	"github.com/lisijie/webcron/app/jobs"
-	"github.com/lisijie/webcron/app/libs"
-	"github.com/lisijie/webcron/app/models"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
+	"doggie/app/jobs"
+	"doggie/app/models"
+	"doggie/app/libs"
 )
 
 type MainController struct {
@@ -130,7 +130,7 @@ func (this *MainController) Login() {
 		if username != "" && password != "" {
 			user, err := models.UserGetByName(username)
 			errorMsg := ""
-			if err != nil || user.Password != libs.Md5([]byte(password+user.Salt)) {
+			if err != nil || user.Password != libs.Md5([]byte(password + user.Salt)) {
 				errorMsg = "帐号或密码错误"
 			} else if user.Status == -1 {
 				errorMsg = "该帐号已禁用"
@@ -141,9 +141,9 @@ func (this *MainController) Login() {
 
 				authkey := libs.Md5([]byte(this.getClientIp() + "|" + user.Password + user.Salt))
 				if remember == "yes" {
-					this.Ctx.SetCookie("auth", strconv.Itoa(user.Id)+"|"+authkey, 7*86400)
+					this.Ctx.SetCookie("auth", strconv.Itoa(user.Id) + "|" + authkey, 7 * 86400)
 				} else {
-					this.Ctx.SetCookie("auth", strconv.Itoa(user.Id)+"|"+authkey)
+					this.Ctx.SetCookie("auth", strconv.Itoa(user.Id) + "|" + authkey)
 				}
 
 				this.redirect(beego.URLFor("TaskController.List"))

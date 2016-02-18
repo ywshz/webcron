@@ -1,3 +1,10 @@
+# 扩展至![webcron](https://github.com/lisijie/webcron)
+
+增加了任务依赖功能 以及 增加了任务类型
+
+![task_list](https://raw.githubusercontent.com/ywshz/webcron/master/task_list.png)
+![task_type](https://raw.githubusercontent.com/ywshz/webcron/master/task_type.png)
+
 # webcron
 ------------
 

@@ -2,12 +2,11 @@ package main
 
 import (
 	"github.com/astaxie/beego"
-	"github.com/lisijie/webcron/app/controllers"
-	"github.com/lisijie/webcron/app/jobs"
-	_ "github.com/lisijie/webcron/app/mail"
-	"github.com/lisijie/webcron/app/models"
 	"html/template"
 	"net/http"
+	"doggie/app/models"
+	"doggie/app/jobs"
+	"doggie/app/controllers"
 )
 
 const VERSION = "1.0.0"
@@ -27,6 +26,8 @@ func main() {
 	// 生产环境不输出debug日志
 	if beego.AppConfig.String("runmode") == "prod" {
 		beego.SetLevel(beego.LevelInformational)
+		beego.SetLogger("file", `{"filename":"` + beego.AppConfig.String("log.file") + `"}`)
+		beego.SetLogFuncCall(true)
 	}
 	beego.AppConfig.Set("version", VERSION)
 
