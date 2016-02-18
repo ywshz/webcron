@@ -88,6 +88,9 @@ func NewCommandJob(task *models.Task) *Job {
 		bufErr := new(bytes.Buffer)
 
 		cmd := exec.Command(fileName)
+		if runtime.GOOS != "windows" {
+			cmd = exec.Command("sh",fileName)
+		}
 		cmd.Stdout = bufOut
 		cmd.Stderr = bufErr
 		err := cmd.Run()
@@ -108,7 +111,7 @@ func NewPythonJob(task *models.Task) *Job {
 
 		bufOut := new(bytes.Buffer)
 		bufErr := new(bytes.Buffer)
-		cmd := exec.Command("python", "-f", fileName)
+		cmd := exec.Command("python", fileName)
 		cmd.Stdout = bufOut
 		cmd.Stderr = bufErr
 		err := cmd.Run()
@@ -154,7 +157,7 @@ func generateCommandFile(comdmandType,command string) string {
 		fileName += ".go";
 	}
 
-	ioutil.WriteFile(fileName, bytes.NewBufferString(command).Bytes(), 0644)
+	ioutil.WriteFile(fileName, bytes.NewBufferString(command).Bytes(), 0744)
 
 	return fileName
 }
